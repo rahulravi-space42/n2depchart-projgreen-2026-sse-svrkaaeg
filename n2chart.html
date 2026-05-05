@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N2 Dependency Chart</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;background:#fff;color:#2c2c2a;padding:12px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
+select,button{font-size:12px;padding:4px 8px;height:28px;border:1px solid #d3d1c7;border-radius:6px;background:#fff;cursor:pointer;color:#2c2c2a}
+button:hover{background:#f1efe8}
+.lvl-checks{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.lvl-checks label{font-size:12px;color:#5f5e5a;display:flex;align-items:center;gap:3px;cursor:pointer}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:#5f5e5a;align-items:center}
+.leg{display:flex;align-items:center;gap:6px}
+.info-bar{font-size:11px;color:#5f5e5a;margin-bottom:8px;padding:6px 10px;background:#f1efe8;border-radius:6px;min-height:32px;line-height:1.5}
+.matrix-wrap{overflow:auto;max-height:calc(100vh - 210px)}
+table{border-collapse:collapse;font-size:10px;table-layout:fixed}
+th,td{border:0.5px solid #d3d1c7}
+th.col-head{
+  writing-mode:vertical-rl;
+  transform:rotate(180deg);
+  white-space:nowrap;
+  padding:4px 2px;
+  font-weight:400;
+  color:#5f5e5a;
+  height:140px;
+  min-width:28px;
+  max-width:28px;
+  vertical-align:bottom;
+  text-align:left;
+  cursor:pointer;
+  transition:background .1s;
+  border-bottom:none;
+}
+th.col-head:hover,th.col-head.hl{background:#E6F1FB;color:#0C447C;font-weight:500}
+th.col-head .indent{display:inline-block}
+th.row-head{
+  text-align:left;
+  padding:2px 6px;
+  font-weight:400;
+  color:#5f5e5a;
+  white-space:nowrap;
+  max-width:200px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  cursor:pointer;
+  min-width:170px;
+  transition:background .1s;
+}
+th.row-head:hover,th.row-head.hl{background:#E6F1FB;color:#0C447C;font-weight:500}
+td.cell{width:28px;min-width:28px;max-width:28px;height:28px;text-align:center;vertical-align:middle;cursor:default;padding:0}
+td.cell.diag{background:#f1efe8}
+td.cell.has-dep{cursor:pointer}
+td.cell.has-dep:hover{background:#f5f4f2}
+td.cell.hl-row,td.cell.hl-col{background:#EEF5FC}
+td.cell.diag.hl-row,td.cell.diag.hl-col{background:#B5D4F4}
+</style>
+</head>
+<body>
+<div class="controls">
+  <select id="ms-filter"><option value="all">All milestones</option></select>
+  <select id="dep-filter">
+    <option value="all">All types</option>
+    <option value="blocked">Has blockers</option>
+    <option value="blocking">Blocks others</option>
+  </select>
+  <button onclick="resetHL()">Clear selection</button>
+</div>
+<div class="lvl-checks">
+  <span style="font-size:12px;color:#5f5e5a">Level:</span>
+  <label><input type="checkbox" id="lv1" checked onchange="build()"> L1 Milestones</label>
+  <label><input type="checkbox" id="lv2" checked onchange="build()"> L2 Tasks</label>
+  <label><input type="checkbox" id="lv3" onchange="build()"> L3 Sub tasks</label>
+  <label><input type="checkbox" id="lv4" onchange="build()"> L4 Sub tasks</label>
+</div>
+<div class="legend">
+  <div class="leg">
+    <svg width="22" height="22" viewBox="0 0 28 28">
+      <path d="M4 24 L20 24 Q24 24 24 20 L24 4" fill="none" stroke="#444441" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="20,4 24,0 28,4 24,8" fill="#444441"/>
+    </svg>
+    Row blocks col
+  </div>
+  <div class="leg">
+    <svg width="22" height="22" viewBox="0 0 28 28">
+      <path d="M24 4 L24 20 Q24 24 20 24 L4 24" fill="none" stroke="#444441" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="4,20 0,24 4,28 8,24" fill="#444441"/>
+    </svg>
+    Col blocks row
+  </div>
+  <div class="leg">
+    <svg width="22" height="22" viewBox="0 0 28 28">
+      <line x1="4" y1="14" x2="24" y2="14" stroke="#444441" stroke-width="2.2" stroke-linecap="round"/>
+      <polygon points="24,10 28,14 24,18" fill="#444441"/>
+      <polygon points="4,10 0,14 4,18" fill="#444441"/>
+    </svg>
+    Mutual
+  </div>
+  <span style="color:#b4b2a9;font-size:10px">| background tint = milestone group</span>
+</div>
+<div class="info-bar" id="info-bar">Loading...</div>
+<div class="matrix-wrap" id="matrix-wrap"></div>
+
+<script>
+// Arrow SVGs — monochrome, direction only
+function arrowSVG(type){
+  const S=28, sw=2.2;
+  if(type==='blocking'){
+    // East then North: starts bottom-left, goes right then up, arrowhead points up
+    return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4 ${S-4} L${S-6} ${S-4} Q${S-4} ${S-4} ${S-4} ${S-10} L${S-4} 4"
+        fill="none" stroke="#444441" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="${S-8},4 ${S-4},0 ${S},4 ${S-4},8" fill="#444441"/>
+    </svg>`;
+  }
+  if(type==='blocked'){
+    // North then West: starts top-right, goes down then left, arrowhead points left
+    return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M${S-4} 4 L${S-4} ${S-6} Q${S-4} ${S-4} ${S-10} ${S-4} L4 ${S-4}"
+        fill="none" stroke="#444441" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="4,${S-8} 0,${S-4} 4,${S} 8,${S-4}" fill="#444441"/>
+    </svg>`;
+  }
+  // Mutual — bidirectional horizontal
+  const mid=S/2;
+  return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg">
+    <line x1="4" y1="${mid}" x2="${S-4}" y2="${mid}" stroke="#444441" stroke-width="${sw}" stroke-linecap="round"/>
+    <polygon points="${S-4},${mid-4} ${S},${mid} ${S-4},${mid+4}" fill="#444441"/>
+    <polygon points="4,${mid-4} 0,${mid} 4,${mid+4}" fill="#444441"/>
+  </svg>`;
+}
+
+// Indentation per level — spaces rendered in a monospace-friendly way
+// For row headers: plain text indent using em spaces
+// For col headers: the vertical text is rotated so indent = padding at the bottom
+const INDENT_ROW = ['', '\u2003', '\u2003\u2003', '\u2003\u2003\u2003'];
+const INDENT_COL = [0, 8, 16, 24]; // px padding-bottom when rotated
+
+const PALETTE=[
+  ["#EEF5FF","#0C447C"],["#F0FAF5","#085041"],["#FEFAE8","#633806"],
+  ["#FEF3EE","#712B13"],["#F4F2FE","#3C3489"],["#EDFAF5","#085041"],
+  ["#FEF0F5","#72243E"],["#F5F4F2","#444441"],["#FFF0F0","#791F1F"],
+  ["#EEF5FF","#0C447C"],["#F0FAF5","#085041"],["#FEFAE8","#633806"],
+];
+const msBg={}, msCol={};
+function assignColors(tasks){
+  const msList=[...new Set(tasks.map(t=>t.ms))];
+  msList.forEach((m,i)=>{
+    const[bg,tx]=PALETTE[i%PALETTE.length];
+    msBg[m]=bg; msCol[m]=tx;
+  });
+}
+
+function parseURLData(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const raw=p.get('data');
+    if(!raw) return null;
+    const parsed=JSON.parse(decodeURIComponent(raw));
+    if(!parsed.tasks||!Array.isArray(parsed.tasks)) return null;
+    return parsed.tasks.map(t=>({
+      name:t.name||'',
+      level:parseInt(t.level)||1,
+      ms:t.ms||t.name,
+      blockedBy:t.blockedBy?t.blockedBy.split(',').map(s=>s.trim()).filter(Boolean):[],
+      blocking:t.blocking?t.blocking.split(',').map(s=>s.trim()).filter(Boolean):[]
+    }));
+  }catch(e){return null;}
+}
+
+const SAMPLE=[
+  {name:"Program ATP",level:1,ms:"Program ATP",blockedBy:["Trade Studies"],blocking:["System SRR"]},
+  {name:"Trade Studies",level:2,ms:"Program ATP",blockedBy:[],blocking:["Program ATP"]},
+  {name:"Trade Study 1 - Perform Architecture Trades",level:3,ms:"Program ATP",blockedBy:[],blocking:[]},
+  {name:"Trade Study 2 - Payload Optimization",level:3,ms:"Program ATP",blockedBy:["Trade Study 1 - Perform Architecture Trades"],blocking:["Trade Study 7 - Manufacturing Study"]},
+  {name:"Trade Study 3 - System Level Trades",level:3,ms:"Program ATP",blockedBy:["Trade Study 1 - Perform Architecture Trades"],blocking:["Trade Study 6 - Satellite Integration and Testing"]},
+  {name:"Trade Study 6 - Satellite Integration and Testing",level:3,ms:"Program ATP",blockedBy:["Trade Study 1 - Perform Architecture Trades","Trade Study 3 - System Level Trades"],blocking:["Trade Study 9 - Automation Opportunities"]},
+  {name:"Trade Study 7 - Manufacturing Study",level:3,ms:"Program ATP",blockedBy:["Trade Study 1 - Perform Architecture Trades","Trade Study 2 - Payload Optimization"],blocking:[]},
+  {name:"Trade Study 9 - Automation Opportunities",level:3,ms:"Program ATP",blockedBy:["Trade Study 6 - Satellite Integration and Testing"],blocking:[]},
+  {name:"System SRR",level:1,ms:"System SRR",blockedBy:["Program ATP"],blocking:["Space SRR","Ground SRR"]},
+  {name:"Space SRR",level:1,ms:"Space SRR",blockedBy:["System SRR"],blocking:["System PDR"]},
+  {name:"Ground SRR",level:1,ms:"Ground SRR",blockedBy:["System SRR"],blocking:["System PDR"]},
+  {name:"System PDR",level:1,ms:"System PDR",blockedBy:["Space SRR","Ground SRR"],blocking:["Ground PDR","Space EQSR"]},
+  {name:"Space PDR",level:1,ms:"Space PDR",blockedBy:[],blocking:[]},
+  {name:"Ground PDR",level:1,ms:"Ground PDR",blockedBy:["System PDR"],blocking:["Ground CDR"]},
+  {name:"Space EQSR",level:1,ms:"Space EQSR",blockedBy:["System PDR"],blocking:["Space CDR"]},
+  {name:"EQSR Avionics",level:2,ms:"Space EQSR",blockedBy:[],blocking:["Space EQSR"]},
+  {name:"EQSR Payload",level:2,ms:"Space EQSR",blockedBy:[],blocking:["Space EQSR"]},
+  {name:"EQSR Structure",level:2,ms:"Space EQSR",blockedBy:[],blocking:["Space EQSR"]},
+  {name:"Ground CDR",level:1,ms:"Ground CDR",blockedBy:["Ground PDR"],blocking:["System CDR"]},
+  {name:"Space CDR",level:1,ms:"Space CDR",blockedBy:["Space EQSR","Bus CDR","Payload CDR"],blocking:["System CDR"]},
+  {name:"Bus CDR",level:2,ms:"Space CDR",blockedBy:[],blocking:["Space CDR"]},
+  {name:"Payload CDR",level:2,ms:"Space CDR",blockedBy:["Payload Channelizer CDR","User Link (L&S) Tiles CDR","Feeder Link Subsystem CDR"],blocking:["Space CDR"]},
+  {name:"Payload Channelizer CDR",level:3,ms:"Space CDR",blockedBy:[],blocking:["Payload CDR"]},
+  {name:"User Link (L&S) Tiles CDR",level:3,ms:"Space CDR",blockedBy:[],blocking:["Payload CDR"]},
+  {name:"Feeder Link Subsystem CDR",level:3,ms:"Space CDR",blockedBy:[],blocking:["Payload CDR"]},
+  {name:"System CDR",level:1,ms:"System CDR",blockedBy:["Space CDR","Ground CDR"],blocking:[]},
+];
+
+let ALL_TASKS=[], hlRow=-1, hlCol=-1, currentTasks=[];
+
+function getFiltered(){
+  const ms=document.getElementById('ms-filter').value;
+  const dep=document.getElementById('dep-filter').value;
+  const lvls=[];
+  ['lv1','lv2','lv3','lv4'].forEach((id,i)=>{
+    if(document.getElementById(id).checked) lvls.push(i+1);
+  });
+  return ALL_TASKS.filter(t=>{
+    if(!lvls.includes(t.level)) return false;
+    if(ms!=='all'&&t.ms!==ms) return false;
+    if(dep==='blocked'&&t.blockedBy.length===0) return false;
+    if(dep==='blocking'&&t.blocking.length===0) return false;
+    return true;
+  });
+}
+
+function sn(n,max){return n.length>max?n.slice(0,max-1)+'…':n}
+
+function build(){
+  hlRow=-1; hlCol=-1;
+  currentTasks=getFiltered();
+  const tasks=currentTasks;
+  const nameSet=new Set(tasks.map(t=>t.name));
+  assignColors(tasks);
+
+  const wrap=document.getElementById('matrix-wrap');
+  const tbl=document.createElement('table');
+
+  // Header row
+  const thead=document.createElement('thead');
+  const hr=document.createElement('tr');
+  const corner=document.createElement('th');
+  corner.style.cssText='min-width:170px;width:170px;border:none;background:transparent';
+  hr.appendChild(corner);
+  tasks.forEach((t,ci)=>{
+    const th=document.createElement('th');
+    th.className='col-head';
+    th.title=t.name+' — L'+t.level+' — '+t.ms;
+    th.style.background=msBg[t.ms]||'#f5f5f5';
+    // Indent col header by adding bottom padding (visible when rotated)
+    const indentPx=INDENT_COL[Math.min(t.level-1, INDENT_COL.length-1)];
+    th.style.paddingBottom=(4+indentPx)+'px';
+    const sp=document.createElement('span');
+    sp.style.color=msCol[t.ms]||'#5f5e5a';
+    sp.textContent=sn(t.name,18);
+    th.appendChild(sp);
+    th.onclick=()=>toggleCol(ci);
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+
+  // Body rows
+  const tbody=document.createElement('tbody');
+  tasks.forEach((rowTask,ri)=>{
+    const tr=document.createElement('tr');
+    const rh=document.createElement('th');
+    rh.className='row-head';
+    rh.title=rowTask.name+' — L'+rowTask.level+' — '+rowTask.ms;
+    rh.style.background=msBg[rowTask.ms]||'#f5f5f5';
+    rh.style.color=msCol[rowTask.ms]||'#5f5e5a';
+    // Indent row header using em spaces based on level
+    const indent=INDENT_ROW[Math.min(rowTask.level-1, INDENT_ROW.length-1)];
+    rh.textContent=indent+sn(rowTask.name,26);
+    rh.onclick=()=>toggleRow(ri);
+    tr.appendChild(rh);
+
+    tasks.forEach((colTask,ci)=>{
+      const td=document.createElement('td');
+      td.className='cell';
+      td.dataset.r=ri; td.dataset.c=ci;
+      const bb=rowTask.blockedBy.includes(colTask.name)&&nameSet.has(colTask.name);
+      const bl=rowTask.blocking.includes(colTask.name)&&nameSet.has(colTask.name);
+      if(ri===ci){
+        td.classList.add('diag');
+        td.style.background=msBg[rowTask.ms]||'#f1efe8';
+      } else if(bb&&bl){
+        td.classList.add('has-dep');
+        td.innerHTML=arrowSVG('both');
+        td.onclick=()=>showDetail(rowTask,colTask,'both');
+      } else if(bb){
+        td.classList.add('has-dep');
+        td.innerHTML=arrowSVG('blocked');
+        td.onclick=()=>showDetail(rowTask,colTask,'blocked');
+      } else if(bl){
+        td.classList.add('has-dep');
+        td.innerHTML=arrowSVG('blocking');
+        td.onclick=()=>showDetail(rowTask,colTask,'blocking');
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.innerHTML='';
+  wrap.appendChild(tbl);
+
+  const dc=tasks.filter(t=>t.blockedBy.length>0||t.blocking.length>0).length;
+  document.getElementById('info-bar').textContent=
+    `${tasks.length} tasks — ${dc} have dependencies. Click a header to highlight, click a cell to inspect.`;
+}
+
+function toggleRow(ri){
+  hlRow=hlRow===ri?-1:ri; hlCol=-1; applyHL();
+  if(hlRow>=0){
+    const t=currentTasks[ri];
+    const bb=t.blockedBy.filter(b=>currentTasks.find(x=>x.name===b));
+    const bl=t.blocking.filter(b=>currentTasks.find(x=>x.name===b));
+    document.getElementById('info-bar').innerHTML=
+      `<strong>${t.name}</strong> &nbsp;|&nbsp; `+
+      `Blocked by: <span style="color:#A32D2D">${bb.length?bb.join(', '):'none in view'}</span> &nbsp;|&nbsp; `+
+      `Blocking: <span style="color:#854F0B">${bl.length?bl.join(', '):'none in view'}</span>`;
+  }
+}
+
+function toggleCol(ci){
+  hlCol=hlCol===ci?-1:ci; hlRow=-1; applyHL();
+  if(hlCol>=0){
+    const t=currentTasks[ci];
+    const bb=t.blockedBy.filter(b=>currentTasks.find(x=>x.name===b));
+    const bl=t.blocking.filter(b=>currentTasks.find(x=>x.name===b));
+    document.getElementById('info-bar').innerHTML=
+      `<strong>${t.name}</strong> &nbsp;|&nbsp; `+
+      `Blocked by: <span style="color:#A32D2D">${bb.length?bb.join(', '):'none in view'}</span> &nbsp;|&nbsp; `+
+      `Blocking: <span style="color:#854F0B">${bl.length?bl.join(', '):'none in view'}</span>`;
+  }
+}
+
+function applyHL(){
+  document.querySelectorAll('.row-head').forEach((el,i)=>el.classList.toggle('hl',i===hlRow));
+  document.querySelectorAll('.col-head').forEach((el,i)=>el.classList.toggle('hl',i===hlCol));
+  document.querySelectorAll('.cell').forEach(td=>{
+    const r=+td.dataset.r, c=+td.dataset.c;
+    td.classList.toggle('hl-row',r===hlRow);
+    td.classList.toggle('hl-col',c===hlCol);
+  });
+}
+
+function resetHL(){
+  hlRow=-1; hlCol=-1; applyHL();
+  document.getElementById('info-bar').textContent='Click a row or column header to highlight. Click a cell to inspect.';
+}
+
+function showDetail(rt,ct,type){
+  const labels={blocked:'is blocked by',blocking:'is blocking',both:'has mutual dependency with'};
+  document.getElementById('info-bar').innerHTML=
+    `<strong>${rt.name}</strong> <span style="font-weight:500">${labels[type]}</span> <strong>${ct.name}</strong>`;
+}
+
+function init(){
+  const urlData=parseURLData();
+  ALL_TASKS=urlData||SAMPLE;
+  if(!urlData){
+    document.getElementById('info-bar').textContent=
+      'Showing sample data. Configure the Power BI URL action with the data parameter to connect live data.';
+  }
+  assignColors(ALL_TASKS);
+  const msSet=[...new Set(ALL_TASKS.map(t=>t.ms))];
+  const sel=document.getElementById('ms-filter');
+  sel.innerHTML='<option value="all">All milestones</option>';
+  msSet.forEach(m=>{
+    const o=document.createElement('option');
+    o.value=m; o.textContent=m;
+    sel.appendChild(o);
+  });
+  sel.onchange=build;
+  document.getElementById('dep-filter').onchange=build;
+  build();
+}
+
+init();
+</script>
+</body>
+</html>
