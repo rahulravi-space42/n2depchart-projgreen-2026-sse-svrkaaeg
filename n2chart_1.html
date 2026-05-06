@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N2 Dependency Chart</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;background:#fff;color:#2c2c2a;padding:12px}
+
+/* Tabs */
+.tab-bar{display:flex;gap:0;margin-bottom:12px;border-bottom:2px solid #d3d1c7}
+.tab{padding:8px 18px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;color:#5f5e5a;background:#f5f4f2;margin-right:4px;transition:all .15s}
+.tab:hover{background:#ebe9e4;color:#2c2c2a}
+.tab.active{background:#fff;color:#0C447C;border-color:#d3d1c7;border-bottom:2px solid #fff;margin-bottom:-2px}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* Controls */
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
+select,button,input[type=number]{font-size:12px;padding:4px 8px;height:28px;border:1px solid #d3d1c7;border-radius:6px;background:#fff;cursor:pointer;color:#2c2c2a}
+input[type=number]{width:70px;cursor:text}
+button:hover{background:#f1efe8}
+.lvl-checks{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.lvl-checks label{font-size:12px;color:#5f5e5a;display:flex;align-items:center;gap:3px;cursor:pointer}
+
+/* Legend */
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:#5f5e5a;align-items:center}
+.leg{display:flex;align-items:center;gap:6px}
+
+/* Info bar */
+.info-bar{font-size:11px;color:#5f5e5a;margin-bottom:8px;padding:6px 10px;background:#f1efe8;border-radius:6px;min-height:32px;line-height:1.5}
+
+/* Critical info bar */
+.info-bar-critical{font-size:11px;margin-bottom:8px;padding:6px 10px;border-radius:6px;min-height:32px;line-height:1.5;background:#FFF3CD;color:#856404;border:1px solid #FFECB5}
+
+/* Matrix */
+.matrix-wrap{overflow:auto;max-height:calc(100vh - 230px)}
+table{border-collapse:collapse;font-size:10px;table-layout:fixed}
+th,td{border:0.5px solid #d3d1c7}
+th.col-head{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;padding:4px 2px;font-weight:400;color:#5f5e5a;height:140px;min-width:28px;max-width:28px;vertical-align:bottom;text-align:left;cursor:pointer;transition:background .1s}
+th.col-head:hover,th.col-head.hl{background:#E6F1FB;color:#0C447C;font-weight:500}
+th.col-head.critical-col{background:#FCEBEB!important;color:#A32D2D!important}
+th.row-head{text-align:left;padding:2px 8px;font-weight:400;color:#5f5e5a;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;cursor:pointer;min-width:170px;transition:background .1s}
+th.row-head:hover,th.row-head.hl{background:#E6F1FB;color:#0C447C;font-weight:500}
+th.row-head.critical-row{background:#FFF3CD!important;color:#856404!important;font-weight:500}
+td.cell{width:28px;min-width:28px;max-width:28px;height:28px;text-align:center;vertical-align:middle;cursor:default;padding:0}
+td.cell.diag{background:#f1efe8}
+td.cell.has-dep{cursor:pointer}
+td.cell.has-dep:hover{background:#f5f4f2}
+td.cell.hl-row,td.cell.hl-col{background:#EEF5FC}
+td.cell.diag.hl-row,td.cell.diag.hl-col{background:#B5D4F4}
+td.cell.critical-block{background:#FCEBEB}
+
+/* Critical summary cards */
+.critical-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.crit-card{background:#FCEBEB;border:1px solid #F7C1C1;border-radius:8px;padding:10px 14px;min-width:160px}
+.crit-card-val{font-size:22px;font-weight:600;color:#A32D2D}
+.crit-card-lbl{font-size:11px;color:#791F1F;margin-top:2px}
+.crit-card.amber{background:#FFF3CD;border-color:#FFD966}
+.crit-card.amber .crit-card-val{color:#856404}
+.crit-card.amber .crit-card-lbl{color:#633806}
+
+/* Critical task list */
+.crit-list{margin-top:12px}
+.crit-list-hdr{font-size:11px;font-weight:600;color:#5f5e5a;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.crit-item{display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:6px;margin-bottom:6px;background:#FFF8F8;border:1px solid #F7C1C1}
+.crit-item-blocker{font-size:12px;font-weight:600;color:#A32D2D;min-width:180px;max-width:220px}
+.crit-item-arrow{font-size:16px;color:#d3d1c7;flex-shrink:0;margin-top:1px}
+.crit-item-blocked{font-size:12px;color:#2c2c2a}
+.crit-item-due{font-size:11px;color:#856404;background:#FFF3CD;padding:2px 6px;border-radius:4px;white-space:nowrap;flex-shrink:0}
+.crit-item-days{font-size:11px;font-weight:600;color:#A32D2D;white-space:nowrap;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- Tab bar -->
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab('tab1',this)">Full Dependency Matrix</div>
+  <div class="tab" onclick="switchTab('tab2',this)">
+    Critical Blocking
+    <span id="crit-badge" style="display:none;background:#A32D2D;color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:5px">0</span>
+  </div>
+</div>
+
+<!-- TAB 1 — Full N2 Matrix -->
+<div class="tab-content active" id="tab1">
+  <div class="controls">
+    <select id="ms-filter" onchange="buildTab1()"><option value="all">All milestones</option></select>
+    <select id="dep-filter" onchange="buildTab1()">
+      <option value="all">All types</option>
+      <option value="blocked">Has blockers</option>
+      <option value="blocking">Blocks others</option>
+    </select>
+    <button onclick="resetHL1()">Clear selection</button>
+  </div>
+  <div class="lvl-checks">
+    <span style="font-size:12px;color:#5f5e5a">Level:</span>
+    <label><input type="checkbox" id="lv1" checked onchange="buildTab1()"> L1 Milestones</label>
+    <label><input type="checkbox" id="lv2" checked onchange="buildTab1()"> L2 Tasks</label>
+    <label><input type="checkbox" id="lv3" onchange="buildTab1()"> L3 Sub tasks</label>
+    <label><input type="checkbox" id="lv4" onchange="buildTab1()"> L4 Sub tasks</label>
+  </div>
+  <div class="legend">
+    <div class="leg">
+      <svg width="20" height="20" viewBox="0 0 28 28"><path d="M4 24 L20 24 Q24 24 24 20 L24 4" fill="none" stroke="#444441" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polygon points="20,4 24,0 28,4 24,8" fill="#444441"/></svg>
+      Row blocks col
+    </div>
+    <div class="leg">
+      <svg width="20" height="20" viewBox="0 0 28 28"><path d="M24 4 L24 20 Q24 24 20 24 L4 24" fill="none" stroke="#444441" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polygon points="4,20 0,24 4,28 8,24" fill="#444441"/></svg>
+      Col blocks row
+    </div>
+    <div class="leg">
+      <svg width="20" height="20" viewBox="0 0 28 28"><line x1="4" y1="14" x2="24" y2="14" stroke="#444441" stroke-width="2.2" stroke-linecap="round"/><polygon points="24,10 28,14 24,18" fill="#444441"/><polygon points="4,10 0,14 4,18" fill="#444441"/></svg>
+      Mutual
+    </div>
+    <span style="color:#b4b2a9;font-size:10px">| background = milestone group</span>
+  </div>
+  <div class="info-bar" id="info1">Click a header to highlight. Click a cell to inspect.</div>
+  <div class="matrix-wrap" id="matrix1"></div>
+</div>
+
+<!-- TAB 2 — Critical Blocking -->
+<div class="tab-content" id="tab2">
+  <div class="controls">
+    <label style="font-size:12px;color:#5f5e5a;display:flex;align-items:center;gap:6px">
+      Show blockers where blocked task is due within
+      <input type="number" id="t-window" value="7" min="1" max="90" onchange="buildTab2()">
+      days
+    </label>
+    <button onclick="buildTab2()">Refresh</button>
+  </div>
+  <div class="info-bar-critical" id="info2">Loading critical dependencies...</div>
+  <div class="critical-summary" id="crit-summary"></div>
+  <div class="crit-list" id="crit-list"></div>
+  <div style="margin-top:16px;border-top:1px solid #d3d1c7;padding-top:12px">
+    <div style="font-size:12px;font-weight:500;color:#5f5e5a;margin-bottom:8px">Critical dependency matrix — blockers highlighted in red</div>
+    <div class="matrix-wrap" id="matrix2"></div>
+  </div>
+</div>
+
+<script>
+// ─── Today's date ──────────────────────────────────────────────────────────────
+const TODAY = new Date();
+TODAY.setHours(0,0,0,0);
+
+function daysDiff(dateStr){
+  if(!dateStr) return null;
+  const d = new Date(dateStr);
+  if(isNaN(d)) return null;
+  d.setHours(0,0,0,0);
+  return Math.round((d - TODAY) / 86400000);
+}
+
+function formatDate(dateStr){
+  if(!dateStr) return '';
+  const d = new Date(dateStr);
+  if(isNaN(d)) return dateStr;
+  return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+}
+
+// ─── Arrow SVGs ────────────────────────────────────────────────────────────────
+function arrowSVG(type, color){
+  const S=28, sw=2.2;
+  const c = color || '#444441';
+  if(type==='blocking'){
+    return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4 ${S-4} L${S-6} ${S-4} Q${S-4} ${S-4} ${S-4} ${S-10} L${S-4} 4" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="${S-8},4 ${S-4},0 ${S},4 ${S-4},8" fill="${c}"/>
+    </svg>`;
+  }
+  if(type==='blocked'){
+    return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M${S-4} 4 L${S-4} ${S-6} Q${S-4} ${S-4} ${S-10} ${S-4} L4 ${S-4}" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="4,${S-8} 0,${S-4} 4,${S} 8,${S-4}" fill="${c}"/>
+    </svg>`;
+  }
+  const mid=S/2;
+  return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg">
+    <line x1="4" y1="${mid}" x2="${S-4}" y2="${mid}" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/>
+    <polygon points="${S-4},${mid-4} ${S},${mid} ${S-4},${mid+4}" fill="${c}"/>
+    <polygon points="4,${mid-4} 0,${mid} 4,${mid+4}" fill="${c}"/>
+  </svg>`;
+}
+
+// ─── Colour palette ────────────────────────────────────────────────────────────
+const PALETTE=[
+  ["#EEF5FF","#0C447C"],["#F0FAF5","#085041"],["#FEFAE8","#633806"],
+  ["#FEF3EE","#712B13"],["#F4F2FE","#3C3489"],["#EDFAF5","#085041"],
+  ["#FEF0F5","#72243E"],["#F5F4F2","#444441"],["#FFF0F0","#791F1F"],
+  ["#EEF5FF","#0C447C"],["#F0FAF5","#085041"],["#FEFAE8","#633806"],
+];
+const msBg={}, msCol={};
+function assignColors(tasks){
+  const msList=[...new Set(tasks.map(t=>t.ms))];
+  msList.forEach((m,i)=>{const[bg,tx]=PALETTE[i%PALETTE.length];msBg[m]=bg;msCol[m]=tx;});
+}
+
+// ─── URL data parsing ──────────────────────────────────────────────────────────
+function parseURLData(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const raw=p.get('data');
+    if(!raw) return null;
+    const parsed=JSON.parse(decodeURIComponent(raw));
+    if(!parsed.tasks||!Array.isArray(parsed.tasks)) return null;
+    return parsed.tasks.map(t=>({
+      name:t.name||'',
+      level:parseInt(t.level)||1,
+      ms:t.ms||t.name,
+      dueDate:t.dueDate||null,
+      completionStatus:t.completionStatus||'',
+      blockedBy:t.blockedBy?t.blockedBy.split(',').map(s=>s.trim()).filter(Boolean):[],
+      blocking:t.blocking?t.blocking.split(',').map(s=>s.trim()).filter(Boolean):[]
+    }));
+  }catch(e){return null;}
+}
+
+// ─── Sample data with due dates ────────────────────────────────────────────────
+// Due dates set relative to today for demo purposes
+function relDate(days){
+  const d=new Date(TODAY);
+  d.setDate(d.getDate()+days);
+  return d.toISOString().split('T')[0];
+}
+
+const SAMPLE=[
+  {name:"Program ATP",level:1,ms:"Program ATP",dueDate:relDate(120),completionStatus:"Completed",blockedBy:["Trade Studies"],blocking:["System SRR"]},
+  {name:"Trade Studies",level:2,ms:"Program ATP",dueDate:relDate(90),completionStatus:"Completed",blockedBy:[],blocking:["Program ATP"]},
+  {name:"Trade Study 1 - Perform Architecture Trades",level:3,ms:"Program ATP",dueDate:relDate(80),completionStatus:"Completed",blockedBy:[],blocking:[]},
+  {name:"Trade Study 2 - Payload Optimization",level:3,ms:"Program ATP",dueDate:relDate(5),completionStatus:"Pending",blockedBy:["Trade Study 1 - Perform Architecture Trades"],blocking:["Trade Study 7 - Manufacturing Study"]},
+  {name:"Trade Study 3 - System Level Trades",level:3,ms:"Program ATP",dueDate:relDate(70),completionStatus:"Completed",blockedBy:["Trade Study 1 - Perform Architecture Trades"],blocking:["Trade Study 6 - Satellite Integration and Testing"]},
+  {name:"Trade Study 6 - Satellite Integration and Testing",level:3,ms:"Program ATP",dueDate:relDate(60),completionStatus:"Completed",blockedBy:["Trade Study 1 - Perform Architecture Trades","Trade Study 3 - System Level Trades"],blocking:["Trade Study 9 - Automation Opportunities"]},
+  {name:"Trade Study 7 - Manufacturing Study",level:3,ms:"Program ATP",dueDate:relDate(3),completionStatus:"Pending",blockedBy:["Trade Study 1 - Perform Architecture Trades","Trade Study 2 - Payload Optimization"],blocking:[]},
+  {name:"Trade Study 9 - Automation Opportunities",level:3,ms:"Program ATP",dueDate:relDate(50),completionStatus:"Completed",blockedBy:["Trade Study 6 - Satellite Integration and Testing"],blocking:[]},
+  {name:"System SRR",level:1,ms:"System SRR",dueDate:relDate(30),completionStatus:"Pending",blockedBy:["Program ATP"],blocking:["Space SRR","Ground SRR"]},
+  {name:"Space SRR",level:1,ms:"Space SRR",dueDate:relDate(6),completionStatus:"Pending",blockedBy:["System SRR"],blocking:["System PDR"]},
+  {name:"Ground SRR",level:1,ms:"Ground SRR",dueDate:relDate(45),completionStatus:"Pending",blockedBy:["System SRR"],blocking:["System PDR"]},
+  {name:"System PDR",level:1,ms:"System PDR",dueDate:relDate(60),completionStatus:"Pending",blockedBy:["Space SRR","Ground SRR"],blocking:["Ground PDR","Space EQSR"]},
+  {name:"Space PDR",level:1,ms:"Space PDR",dueDate:relDate(90),completionStatus:"Pending",blockedBy:[],blocking:[]},
+  {name:"Ground PDR",level:1,ms:"Ground PDR",dueDate:relDate(120),completionStatus:"Pending",blockedBy:["System PDR"],blocking:["Ground CDR"]},
+  {name:"Space EQSR",level:1,ms:"Space EQSR",dueDate:relDate(150),completionStatus:"Pending",blockedBy:["System PDR"],blocking:["Space CDR"]},
+  {name:"EQSR Avionics",level:2,ms:"Space EQSR",dueDate:relDate(140),completionStatus:"Pending",blockedBy:[],blocking:["Space EQSR"]},
+  {name:"EQSR Payload",level:2,ms:"Space EQSR",dueDate:relDate(140),completionStatus:"Pending",blockedBy:[],blocking:["Space EQSR"]},
+  {name:"EQSR Structure",level:2,ms:"Space EQSR",dueDate:relDate(140),completionStatus:"Pending",blockedBy:[],blocking:["Space EQSR"]},
+  {name:"Ground CDR",level:1,ms:"Ground CDR",dueDate:relDate(180),completionStatus:"Pending",blockedBy:["Ground PDR"],blocking:["System CDR"]},
+  {name:"Space CDR",level:1,ms:"Space CDR",dueDate:relDate(200),completionStatus:"Pending",blockedBy:["Space EQSR","Bus CDR","Payload CDR"],blocking:["System CDR"]},
+  {name:"Bus CDR",level:2,ms:"Space CDR",dueDate:relDate(190),completionStatus:"Pending",blockedBy:[],blocking:["Space CDR"]},
+  {name:"Payload CDR",level:2,ms:"Space CDR",dueDate:relDate(4),completionStatus:"Pending",blockedBy:["Payload Channelizer CDR","User Link (L&S) Tiles CDR","Feeder Link Subsystem CDR"],blocking:["Space CDR"]},
+  {name:"Payload Channelizer CDR",level:3,ms:"Space CDR",dueDate:relDate(180),completionStatus:"Pending",blockedBy:[],blocking:["Payload CDR"]},
+  {name:"User Link (L&S) Tiles CDR",level:3,ms:"Space CDR",dueDate:relDate(180),completionStatus:"Pending",blockedBy:[],blocking:["Payload CDR"]},
+  {name:"Feeder Link Subsystem CDR",level:3,ms:"Space CDR",dueDate:relDate(180),completionStatus:"Pending",blockedBy:[],blocking:["Payload CDR"]},
+  {name:"System CDR",level:1,ms:"System CDR",dueDate:relDate(220),completionStatus:"Pending",blockedBy:["Space CDR","Ground CDR"],blocking:[]},
+];
+
+// ─── State ─────────────────────────────────────────────────────────────────────
+let ALL_TASKS=[], hlRow1=-1, hlCol1=-1, currentTasks1=[];
+
+// ─── Shared helpers ────────────────────────────────────────────────────────────
+function sn(n,max){return n.length>max?n.slice(0,max-1)+'…':n}
+
+function getLevels(){
+  const lvls=[];
+  ['lv1','lv2','lv3','lv4'].forEach((id,i)=>{if(document.getElementById(id).checked)lvls.push(i+1);});
+  return lvls;
+}
+
+// ─── TAB SWITCHING ─────────────────────────────────────────────────────────────
+function switchTab(id, el){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  el.classList.add('active');
+  if(id==='tab2') buildTab2();
+}
+
+// ─── TAB 1 — Full matrix ───────────────────────────────────────────────────────
+function getFilteredTab1(){
+  const ms=document.getElementById('ms-filter').value;
+  const dep=document.getElementById('dep-filter').value;
+  const lvls=getLevels();
+  return ALL_TASKS.filter(t=>{
+    if(!lvls.includes(t.level)) return false;
+    if(ms!=='all'&&t.ms!==ms) return false;
+    if(dep==='blocked'&&t.blockedBy.length===0) return false;
+    if(dep==='blocking'&&t.blocking.length===0) return false;
+    return true;
+  });
+}
+
+function buildTab1(){
+  hlRow1=-1; hlCol1=-1;
+  currentTasks1=getFilteredTab1();
+  const tasks=currentTasks1;
+  const nameSet=new Set(tasks.map(t=>t.name));
+  assignColors(tasks);
+  const wrap=document.getElementById('matrix1');
+  const tbl=document.createElement('table');
+
+  // Header
+  const thead=document.createElement('thead');
+  const hr=document.createElement('tr');
+  const corner=document.createElement('th');
+  corner.style.cssText='min-width:170px;width:170px;border:none;background:transparent';
+  hr.appendChild(corner);
+  tasks.forEach((t,ci)=>{
+    const th=document.createElement('th');
+    th.className='col-head';
+    th.title=t.name+' — L'+t.level+(t.dueDate?' — Due: '+formatDate(t.dueDate):'');
+    th.style.background=msBg[t.ms]||'#f5f5f5';
+    const sp=document.createElement('span');
+    sp.style.color=msCol[t.ms]||'#5f5e5a';
+    sp.textContent=sn(t.name,18);
+    th.appendChild(sp);
+    th.onclick=()=>toggleCol1(ci);
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+
+  // Body
+  const tbody=document.createElement('tbody');
+  tasks.forEach((rowTask,ri)=>{
+    const tr=document.createElement('tr');
+    const rh=document.createElement('th');
+    rh.className='row-head';
+    rh.title=rowTask.name+' — L'+rowTask.level+(rowTask.dueDate?' — Due: '+formatDate(rowTask.dueDate):'');
+    rh.style.background=msBg[rowTask.ms]||'#f5f5f5';
+    rh.style.color=msCol[rowTask.ms]||'#5f5e5a';
+    const indent=['','\u2003','\u2003\u2003','\u2003\u2003\u2003'][Math.min(rowTask.level-1,3)];
+    rh.textContent=indent+sn(rowTask.name,26);
+    rh.onclick=()=>toggleRow1(ri);
+    tr.appendChild(rh);
+
+    tasks.forEach((colTask,ci)=>{
+      const td=document.createElement('td');
+      td.className='cell';
+      td.dataset.r=ri; td.dataset.c=ci;
+      const bb=rowTask.blockedBy.includes(colTask.name)&&nameSet.has(colTask.name);
+      const bl=rowTask.blocking.includes(colTask.name)&&nameSet.has(colTask.name);
+      if(ri===ci){
+        td.classList.add('diag');
+        td.style.background=msBg[rowTask.ms]||'#f1efe8';
+      } else if(bb&&bl){
+        td.classList.add('has-dep');
+        td.innerHTML=arrowSVG('both');
+        td.onclick=()=>showDetail1(rowTask,colTask,'both');
+      } else if(bb){
+        td.classList.add('has-dep');
+        td.innerHTML=arrowSVG('blocked');
+        td.onclick=()=>showDetail1(rowTask,colTask,'blocked');
+      } else if(bl){
+        td.classList.add('has-dep');
+        td.innerHTML=arrowSVG('blocking');
+        td.onclick=()=>showDetail1(rowTask,colTask,'blocking');
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.innerHTML='';
+  wrap.appendChild(tbl);
+
+  const dc=tasks.filter(t=>t.blockedBy.length>0||t.blocking.length>0).length;
+  document.getElementById('info1').textContent=
+    `${tasks.length} tasks — ${dc} have dependencies. Click a header to highlight, click a cell to inspect.`;
+}
+
+function toggleRow1(ri){
+  hlRow1=hlRow1===ri?-1:ri; hlCol1=-1; applyHL1();
+  if(hlRow1>=0){
+    const t=currentTasks1[ri];
+    const bb=t.blockedBy.filter(b=>currentTasks1.find(x=>x.name===b));
+    const bl=t.blocking.filter(b=>currentTasks1.find(x=>x.name===b));
+    document.getElementById('info1').innerHTML=
+      `<strong>${t.name}</strong>${t.dueDate?' (Due: '+formatDate(t.dueDate)+')':''} &nbsp;|&nbsp; `+
+      `Blocked by: <span style="color:#A32D2D">${bb.length?bb.join(', '):'none'}</span> &nbsp;|&nbsp; `+
+      `Blocking: <span style="color:#854F0B">${bl.length?bl.join(', '):'none'}</span>`;
+  }
+}
+
+function toggleCol1(ci){
+  hlCol1=hlCol1===ci?-1:ci; hlRow1=-1; applyHL1();
+  if(hlCol1>=0){
+    const t=currentTasks1[ci];
+    const bb=t.blockedBy.filter(b=>currentTasks1.find(x=>x.name===b));
+    const bl=t.blocking.filter(b=>currentTasks1.find(x=>x.name===b));
+    document.getElementById('info1').innerHTML=
+      `<strong>${t.name}</strong>${t.dueDate?' (Due: '+formatDate(t.dueDate)+')':''} &nbsp;|&nbsp; `+
+      `Blocked by: <span style="color:#A32D2D">${bb.length?bb.join(', '):'none'}</span> &nbsp;|&nbsp; `+
+      `Blocking: <span style="color:#854F0B">${bl.length?bl.join(', '):'none'}</span>`;
+  }
+}
+
+function applyHL1(){
+  document.querySelectorAll('#matrix1 .row-head').forEach((el,i)=>el.classList.toggle('hl',i===hlRow1));
+  document.querySelectorAll('#matrix1 .col-head').forEach((el,i)=>el.classList.toggle('hl',i===hlCol1));
+  document.querySelectorAll('#matrix1 .cell').forEach(td=>{
+    const r=+td.dataset.r, c=+td.dataset.c;
+    td.classList.toggle('hl-row',r===hlRow1);
+    td.classList.toggle('hl-col',c===hlCol1);
+  });
+}
+
+function resetHL1(){
+  hlRow1=-1; hlCol1=-1; applyHL1();
+  document.getElementById('info1').textContent='Click a header to highlight. Click a cell to inspect.';
+}
+
+function showDetail1(rt,ct,type){
+  const labels={blocked:'is blocked by',blocking:'is blocking',both:'has mutual dependency with'};
+  document.getElementById('info1').innerHTML=
+    `<strong>${rt.name}</strong> <span style="font-weight:500">${labels[type]}</span> <strong>${ct.name}</strong>`;
+}
+
+// ─── TAB 2 — Critical Blocking ─────────────────────────────────────────────────
+function buildTab2(){
+  const window_days=parseInt(document.getElementById('t-window').value)||7;
+  const taskMap={};
+  ALL_TASKS.forEach(t=>taskMap[t.name]=t);
+
+  // Find critical pairs:
+  // A pair (blocker, blocked) is critical when:
+  // 1. blocked task due date is within T window
+  // 2. blocked task is not yet completed
+  // 3. blocker is not yet completed (still actively blocking)
+  const criticalPairs=[];
+  const criticalBlockers=new Set();
+  const criticalBlocked=new Set();
+
+  ALL_TASKS.forEach(blockedTask=>{
+    if(!blockedTask.dueDate) return;
+    if(blockedTask.completionStatus==='Completed') return;
+    const daysUntilDue=daysDiff(blockedTask.dueDate);
+    if(daysUntilDue===null) return;
+    if(daysUntilDue > window_days) return;
+
+    // This task is due soon and not complete — find its active blockers
+    blockedTask.blockedBy.forEach(blockerName=>{
+      const blocker=taskMap[blockerName];
+      if(!blocker) return;
+      if(blocker.completionStatus==='Completed') return; // blocker already done
+      criticalPairs.push({
+        blocker: blocker,
+        blocked: blockedTask,
+        daysUntilDue: daysUntilDue,
+        overdue: daysUntilDue < 0
+      });
+      criticalBlockers.add(blockerName);
+      criticalBlocked.add(blockedTask.name);
+    });
+  });
+
+  // Sort by days until due (most urgent first)
+  criticalPairs.sort((a,b)=>a.daysUntilDue - b.daysUntilDue);
+
+  // Update badge
+  const badge=document.getElementById('crit-badge');
+  if(criticalPairs.length > 0){
+    badge.style.display='inline';
+    badge.textContent=criticalPairs.length;
+  } else {
+    badge.style.display='none';
+  }
+
+  // Info bar
+  const infoEl=document.getElementById('info2');
+  if(criticalPairs.length===0){
+    infoEl.textContent=`No critical blocking dependencies found within T-${window_days} days. All tasks due in this window are either complete or unblocked.`;
+    infoEl.style.background='#F0FAF5';
+    infoEl.style.color='#085041';
+  } else {
+    infoEl.innerHTML=`<strong>${criticalPairs.length} critical blocking ${criticalPairs.length===1?'dependency':'dependencies'}</strong> found — ${criticalBlockers.size} task${criticalBlockers.size===1?'':'s'} blocking ${criticalBlocked.size} task${criticalBlocked.size===1?'':'s'} due within <strong>T-${window_days} days</strong>`;
+    infoEl.style.background='#FFF3CD';
+    infoEl.style.color='#856404';
+  }
+
+  // Summary cards
+  const overdueCount=criticalPairs.filter(p=>p.overdue).length;
+  const imminentCount=criticalPairs.filter(p=>!p.overdue&&p.daysUntilDue<=3).length;
+  document.getElementById('crit-summary').innerHTML=`
+    <div class="crit-card">
+      <div class="crit-card-val">${criticalPairs.length}</div>
+      <div class="crit-card-lbl">Critical blocking pairs</div>
+    </div>
+    <div class="crit-card">
+      <div class="crit-card-val">${criticalBlockers.size}</div>
+      <div class="crit-card-lbl">Active blockers</div>
+    </div>
+    <div class="crit-card amber">
+      <div class="crit-card-val">${imminentCount}</div>
+      <div class="crit-card-lbl">Due within 3 days</div>
+    </div>
+    <div class="crit-card" style="background:#FFF0F0;border-color:#F7C1C1">
+      <div class="crit-card-val" style="color:#791F1F">${overdueCount}</div>
+      <div class="crit-card-lbl" style="color:#791F1F">Already overdue</div>
+    </div>
+  `;
+
+  // Critical pair list
+  const listEl=document.getElementById('crit-list');
+  if(criticalPairs.length===0){
+    listEl.innerHTML='';
+  } else {
+    listEl.innerHTML=`<div class="crit-list-hdr">Critical blocking dependencies — sorted by urgency</div>`;
+    criticalPairs.forEach(p=>{
+      const daysLabel = p.overdue
+        ? `<span style="color:#791F1F;font-weight:600">${Math.abs(p.daysUntilDue)}d overdue</span>`
+        : p.daysUntilDue===0
+        ? `<span style="color:#791F1F;font-weight:600">Due today</span>`
+        : `<span style="color:#856404;font-weight:600">T-${p.daysUntilDue}d</span>`;
+      listEl.innerHTML+=`
+        <div class="crit-item">
+          <div class="crit-item-blocker" title="${p.blocker.name}">⛔ ${sn(p.blocker.name,28)}</div>
+          <div class="crit-item-arrow">→</div>
+          <div class="crit-item-blocked" title="${p.blocked.name}" style="flex:1">${sn(p.blocked.name,30)}</div>
+          <div class="crit-item-due">Due: ${formatDate(p.blocked.dueDate)}</div>
+          <div class="crit-item-days">${daysLabel}</div>
+        </div>`;
+    });
+  }
+
+  // Critical matrix — show all tasks but highlight critical blockers
+  buildCriticalMatrix(criticalBlockers, criticalBlocked, window_days);
+}
+
+function buildCriticalMatrix(criticalBlockers, criticalBlocked, window_days){
+  // Only show tasks that are involved in critical dependencies
+  const relevantNames=new Set([...criticalBlockers,...criticalBlocked]);
+  const tasks = relevantNames.size > 0
+    ? ALL_TASKS.filter(t=>relevantNames.has(t.name))
+    : [];
+
+  const wrap=document.getElementById('matrix2');
+  if(tasks.length===0){
+    wrap.innerHTML=`<p style="font-size:12px;color:#5f5e5a;padding:12px">No tasks to display — no critical dependencies within T-${window_days} days.</p>`;
+    return;
+  }
+
+  assignColors(tasks);
+  const nameSet=new Set(tasks.map(t=>t.name));
+  const tbl=document.createElement('table');
+
+  // Header
+  const thead=document.createElement('thead');
+  const hr=document.createElement('tr');
+  const corner=document.createElement('th');
+  corner.style.cssText='min-width:170px;width:170px;border:none;background:transparent';
+  hr.appendChild(corner);
+  tasks.forEach(t=>{
+    const th=document.createElement('th');
+    th.className='col-head'+(criticalBlockers.has(t.name)?' critical-col':'');
+    th.title=t.name+(t.dueDate?' — Due: '+formatDate(t.dueDate):'')+(criticalBlockers.has(t.name)?' [BLOCKING CRITICAL TASK]':'');
+    th.style.background=criticalBlockers.has(t.name)?'#FCEBEB':(msBg[t.ms]||'#f5f5f5');
+    const sp=document.createElement('span');
+    sp.style.color=criticalBlockers.has(t.name)?'#A32D2D':(msCol[t.ms]||'#5f5e5a');
+    sp.textContent=sn(t.name,18);
+    th.appendChild(sp);
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+
+  const tbody=document.createElement('tbody');
+  tasks.forEach((rowTask,ri)=>{
+    const tr=document.createElement('tr');
+    const rh=document.createElement('th');
+    const isCritBlocked=criticalBlocked.has(rowTask.name);
+    const isCritBlocker=criticalBlockers.has(rowTask.name);
+    rh.className='row-head'+(isCritBlocker?' critical-row':'');
+    rh.title=rowTask.name+(rowTask.dueDate?' — Due: '+formatDate(rowTask.dueDate):'');
+    rh.style.background=isCritBlocker?'#FFF3CD':(msBg[rowTask.ms]||'#f5f5f5');
+    rh.style.color=isCritBlocker?'#856404':(msCol[rowTask.ms]||'#5f5e5a');
+    const indent=['','\u2003','\u2003\u2003','\u2003\u2003\u2003'][Math.min(rowTask.level-1,3)];
+    const dueStr=rowTask.dueDate?' ('+formatDate(rowTask.dueDate)+')':'';
+    const prefix=isCritBlocker?'⛔ ':'';
+    rh.textContent=indent+prefix+sn(rowTask.name,22)+dueStr;
+    tr.appendChild(rh);
+
+    tasks.forEach((colTask,ci)=>{
+      const td=document.createElement('td');
+      td.className='cell';
+      const bb=rowTask.blockedBy.includes(colTask.name)&&nameSet.has(colTask.name);
+      const bl=rowTask.blocking.includes(colTask.name)&&nameSet.has(colTask.name);
+      const isCritPair=criticalBlockers.has(colTask.name)&&criticalBlocked.has(rowTask.name);
+
+      if(ri===ci){
+        td.classList.add('diag');
+        td.style.background=isCritBlocker?'#FFF3CD':(msBg[rowTask.ms]||'#f1efe8');
+      } else if(bb&&bl){
+        td.classList.add('has-dep');
+        if(isCritPair) td.classList.add('critical-block');
+        td.innerHTML=arrowSVG('both', isCritPair?'#A32D2D':'#444441');
+      } else if(bb){
+        td.classList.add('has-dep');
+        if(isCritPair) td.classList.add('critical-block');
+        td.innerHTML=arrowSVG('blocked', isCritPair?'#A32D2D':'#444441');
+      } else if(bl){
+        td.classList.add('has-dep');
+        if(isCritPair) td.classList.add('critical-block');
+        td.innerHTML=arrowSVG('blocking', isCritPair?'#A32D2D':'#444441');
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.innerHTML='';
+  wrap.appendChild(tbl);
+}
+
+// ─── Init ──────────────────────────────────────────────────────────────────────
+function init(){
+  const urlData=parseURLData();
+  ALL_TASKS=urlData||SAMPLE;
+  if(!urlData){
+    document.getElementById('info1').textContent=
+      'Showing sample data. Configure the Power BI URL action with the data parameter to connect live data.';
+  }
+  assignColors(ALL_TASKS);
+
+  // Populate milestone filter
+  const msSet=[...new Set(ALL_TASKS.map(t=>t.ms))];
+  const sel=document.getElementById('ms-filter');
+  sel.innerHTML='<option value="all">All milestones</option>';
+  msSet.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;sel.appendChild(o);});
+
+  buildTab1();
+  buildTab2(); // preload badge count
+}
+
+init();
+</script>
+</body>
+</html>
